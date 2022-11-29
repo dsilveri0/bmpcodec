@@ -26,32 +26,38 @@
 
 #define FILEBMP "insanecat.bmp"
 #define FILEQOI "insanecat.qoi"
+#define RAWPIXELDATA "rawpixeldata"
 
 typedef unsigned char BYTE;
 
+#pragma pack(1)
 typedef struct {
-	int id;
+	short id;
 	int bmp_size;
+	short app_spec;
+	short app_spec2;
 	int pixel_array_off;
 	int dib_header_bytes;
 	int width;
 	int height;
-	int colorplanes;
-	int bpp;
+	short colorplanes;
+	short bpp;
 	int compression;
 	int raw_data_size;
-	int image_print_res;
+	int image_res_hori;
+	int image_res_vert;
 	int ncolors_palette;
 	int important_colors;
-	int row_size;
-	int array_size;
-} bmp,  *bmp_format_t;
+} bmp_header, bmp_header_t;
+
+struct row_size {	
+	int rowsize;
+	int arraysize;
+};
 
 int calc_rowsize(int bpp, int image_width, int image_height) {	
 	int row_size = (bpp*image_width)/8;
 	int array_size = row_size*abs(image_height);
-	
-	printf("%d\n%d\n", row_size, array_size);
 	
 	if(row_size%4!=0){
 		int align = 4-row_size%4;
@@ -82,100 +88,49 @@ BYTE *read_bytes(FILE *ptr, int start_byte, int end_byte) {
 	return bytes;
 }
 
+// Refactor into a generic decoder that works with both formats.
+void bmp_decoder(FILE *src_ptr, FILE *dest_ptr) {
+	bmp_header_t* pBmp;
+	
+	BYTE *bytes = read_bytes(src_ptr, 0, 54);
+	if(bytes) {
+		// cast bytes into a struct
+		pBmp = (bmp_header_t*)bytes;	
+	}
+	
+	// read pixel array bytes
+	BYTE *pixel_arr_bytes = read_bytes(src_ptr, pBmp->pixel_array_off, pBmp->raw_data_size);
+	if(pixel_arr_bytes) {
+		// print bytes to verify if its working
+		
+		int row = calc_rowsize(pBmp->bpp, pBmp->width, pBmp->height);
+		int array_size = row*abs(pBmp->height);
+		
+		// store pixel array bytes into dest file
+		fwrite(pixel_arr_bytes, array_size, 1, dest_ptr);
+	}
+	
+	// free the memory allocation
+	free(bytes);
+	free(pixel_arr_bytes);
+}
+
 int main(int argc, char **argv)
 {
 	FILE* ptr;
-	
-	/*
-	int ch, chr;
-	int inc, inc2 = 0;
-	
-	
-	int bpp = 24;
-	int image_width = 326;
-	int image_height = 324;
-	
-	int row_size;
-	int array_size;*/
+	FILE* dest_ptr;
 	
 	ptr = fopen(FILEBMP, "r");
-	if(NULL == ptr)
+	dest_ptr = fopen(RAWPIXELDATA, "w");
+	if(NULL == ptr || NULL == dest_ptr)
 		return 1;
+		
+	bmp_decoder(ptr, dest_ptr);
 	
-	printf("file contents: \n");	
-	BYTE *bytes = read_bytes(ptr, 0, 54);
-	if(bytes) {
-		
-		bmp_format_t pBmp = (bmp_format_t)bytes;
-		printf("TESTING: %p ======\n\n",&pBmp[1].id);
-		
-		// print bytes to verify if its working
-		for(int i = 0; i<54; i++) {
-			printf("%03x ",i);
-			printf("%02x ",bytes[i]);
-			printf("%d ",bytes[i]);
-			printf("%c\n",bytes[i]);
-		}
-		// free bytes from memory allocation
-		free(bytes);
-	}
 	
-	/*
-	do {
-		ch = fgetc(ptr);
-		
-		// Byte 0 to 137 -> Headers
-		// Byte 138+ -> Pixel Array
-		
-		if(inc >= 0 && inc < 138){
-			// Begin of print - formatting so its easier to view
-			printf("[%d]", inc);
-			printf("%02x->", inc);
-			printf("%02x", ch);
-			if(inc%16==15)
-				printf("\n");
-			else if(inc%1==0)
-				printf(" ");
-			//End of print
-		}
-		//54 -> ... 317658
-		if(inc == 0){
-			row_size = ((bpp*image_width)/32)*4+1;
-			array_size = row_size*abs(image_height);
-			
-			printf("%d\n%d\n", row_size, array_size);
-			
-			if(row_size%4!=0){
-				int align = 4-row_size%4;
-				row_size += align;
-			}
-			
-		}
-		int ite = 1;
-		if(inc >= 138 && inc <= row_size){
-			printf("%02x", ch);
-			
-			for(int i=0;i<=row_size;i++){
-				if(inc==row_size*ite){
-					printf("\n\n\n");
-				}
-				else if(inc%2==1)
-				printf(" ");
-			ite++;
-			}
-			
-			
-			printf("%02x", ch);
-			if(inc%8==7)
-				printf("\n");
-			else if(inc%1==0)
-				printf(" ");
-				
-		}
-		inc++;
-	} while (ch != EOF);*/
-	
+	fclose(dest_ptr);
 	fclose(ptr);
+	
 	return 0;
 }
 
