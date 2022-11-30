@@ -50,14 +50,8 @@ typedef struct {
 	int important_colors;
 } bmp_header, bmp_header_t;
 
-struct row_size {	
-	int rowsize;
-	int arraysize;
-};
-
 int calc_rowsize(int bpp, int image_width, int image_height) {	
 	int row_size = (bpp*image_width)/8;
-	int array_size = row_size*abs(image_height);
 	
 	if(row_size%4!=0){
 		int align = 4-row_size%4;
@@ -65,6 +59,10 @@ int calc_rowsize(int bpp, int image_width, int image_height) {
 	}
 	
 	return row_size;
+}
+
+int calc_arraysize(int row_size, int image_height) {
+	return row_size*abs(image_height);
 }
 
 BYTE *read_bytes(FILE *ptr, int start_byte, int end_byte) {
@@ -89,82 +87,101 @@ BYTE *read_bytes(FILE *ptr, int start_byte, int end_byte) {
 }
 
 // Refactor into a generic decoder that works with both formats.
-void bmp_decoder(FILE *src_ptr, FILE *dest_ptr) {
-	bmp_header_t* pBmp;
+void bmp_decoder(FILE *src_ptr, FILE *dest_ptr, bmp_header_t **pBmp) {	
 	
 	BYTE *bytes = read_bytes(src_ptr, 0, 54);
 	if(bytes) {
 		// cast bytes into a struct
-		pBmp = (bmp_header_t*)bytes;	
+		*pBmp = (bmp_header_t*)bytes;
 	}
 	
 	// read pixel array bytes
-	BYTE *pixel_arr_bytes = read_bytes(src_ptr, pBmp->pixel_array_off, pBmp->raw_data_size);
+	BYTE *pixel_arr_bytes = read_bytes(src_ptr, (*pBmp)->pixel_array_off, (*pBmp)->raw_data_size);
 	if(pixel_arr_bytes) {
-		// print bytes to verify if its working
+		// calc the row size 
+		int row = calc_rowsize((*pBmp)->bpp, (*pBmp)->width, (*pBmp)->height);
 		
-		int row = calc_rowsize(pBmp->bpp, pBmp->width, pBmp->height);
-		int array_size = row*abs(pBmp->height);
+		// use the row size to cal array size
+		int array_size = calc_arraysize(row, (*pBmp)->height);
 		
 		// store pixel array bytes into dest file
 		fwrite(pixel_arr_bytes, array_size, 1, dest_ptr);
 	}
 	
 	// free the memory allocation
-	free(bytes);
 	free(pixel_arr_bytes);
 }
 
-int main(int argc, char **argv)
-{
-	FILE* ptr;
+int bmp_encoder(FILE *src_ptr, bmp_header_t *pBmp) {
+	// Add struct data to a dest file, next add raw pixel data.
+	
 	FILE* dest_ptr;
 	
-	ptr = fopen(FILEBMP, "r");
-	dest_ptr = fopen(RAWPIXELDATA, "w");
-	if(NULL == ptr || NULL == dest_ptr)
+	// opening file
+	dest_ptr = fopen("bmpencoded", "wb");
+	if(NULL == dest_ptr)
 		return 1;
+	
+	// print data from the struct
+	printf("%02x\n", pBmp->id);
+	printf("%02x\n", pBmp->bmp_size);
+	printf("%02x\n", pBmp->app_spec);
+	printf("%02x\n", pBmp->app_spec2);
+	printf("%02x\n", pBmp->pixel_array_off);
+	printf("%02x\n", pBmp->dib_header_bytes);
+	printf("%02x\n", pBmp->width);
+	printf("%02x\n", pBmp->height);
+	printf("%02x\n", pBmp->colorplanes);
+	printf("%02x\n", pBmp->bpp);
+	printf("%02x\n", pBmp->compression);
+	printf("%02x\n", pBmp->raw_data_size);
+	printf("%02x\n", pBmp->image_res_hori);
+	printf("%02x\n", pBmp->image_res_vert);
+	printf("%02x\n", pBmp->ncolors_palette);
+	printf("%02x\n", pBmp->important_colors);
+	
+	int row = calc_rowsize(pBmp->bpp, pBmp->width, pBmp->height);
+	int array_size = calc_arraysize(row, pBmp->height);
 		
-	bmp_decoder(ptr, dest_ptr);
+	pBmp->pixel_array_off = sizeof(bmp_header);
+		
+	// write header to dest file
+	fwrite(pBmp, sizeof(bmp_header), 1, dest_ptr);
+	fwrite(src_ptr, array_size, 1, dest_ptr);
 	
-	
+	// closing file
 	fclose(dest_ptr);
-	fclose(ptr);
 	
 	return 0;
 }
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+int main(int argc, char **argv)
+{
+	FILE* ptr_bmp;
+	FILE* ptr_qoi;
+	FILE* ptr_rawpixeldata;
+	
+	bmp_header_t* pBmp;
+	
+	// Opening files
+	ptr_bmp = fopen(FILEBMP, "r");
+	ptr_qoi = fopen(FILEQOI, "r");
+	ptr_rawpixeldata = fopen(RAWPIXELDATA, "w+");
+	if(NULL == ptr_bmp || NULL == ptr_rawpixeldata || NULL == ptr_qoi)
+		return 1;	
+	
+	// Encoding/Decoding operations
+	bmp_decoder(ptr_bmp, ptr_rawpixeldata, &pBmp);	
+	bmp_encoder(ptr_rawpixeldata, pBmp);
+	
+	// Closing files.
+	fclose(ptr_rawpixeldata);
+	fclose(ptr_qoi);
+	fclose(ptr_bmp);
+	
+	// Free memory allocation
+	free(pBmp);
+	
+	return 0;
+}
