@@ -48,11 +48,35 @@ typedef struct {
 	int image_res_vert;
 	int ncolors_palette;
 	int important_colors;
+	int red_bitmask;
+	int green_bitmask;
+	int blue_bitmask;
+	int alpha_bitmask;
+	int colour_space;
+	int redX;
+	int redY;
+	int redZ;
+	int greenX;
+	int greenY;
+	int greenZ;
+	int blueX;
+	int blueY;
+	int blueZ;
+	int red_gamma;
+	int green_gamma;
+	int blue_gamma;
+	int v5_intent;
+	int v5_profile_data;
+	int v5_profile_size;
+	int v5_reserved;
 } bmp_header, bmp_header_t;
 
-int calc_rowsize(int bpp, int image_width, int image_height) {	
+int calc_rowsize(int bpp, int image_width) {
+	// calculating row size based on docs formula
 	int row_size = (bpp*image_width)/8;
 	
+	// aligning row to a multiple of 4 if its not aligned 
+	// by adding the necessary bytes as padding
 	if(row_size%4!=0){
 		int align = 4-row_size%4;
 		row_size += align;
@@ -62,18 +86,27 @@ int calc_rowsize(int bpp, int image_width, int image_height) {
 }
 
 int calc_arraysize(int row_size, int image_height) {
+	// calculating array size based on the row size and height
 	return row_size*abs(image_height);
 }
 
+/* Read bytes function reads X amount of bytes from a file
+ * it receives a file a starting byte and an ending byte.
+ * */
 BYTE *read_bytes(FILE *ptr, int start_byte, int end_byte) {
 	int i,j;
 	unsigned int ch;
+	// calculating the difference between the start and end bytes and 
+	// allocating it as memory for the bytes buffer
 	int size = abs(end_byte-start_byte);
 	BYTE *bytes = malloc(size);
 	
 	if(!bytes)
 		return NULL;
 	
+	// reading the first char of the file and then iterating until end 
+	// byte has been reached or EOF. If start byte is reached, that byte
+	// is stored in the bytes buffer.
 	ch = fgetc(ptr);
 	for(i=0, j=0;i<end_byte && ch < EOF;i++) {
 		if(i >= start_byte) {
@@ -86,34 +119,35 @@ BYTE *read_bytes(FILE *ptr, int start_byte, int end_byte) {
 	return bytes;
 }
 
-// Refactor into a generic decoder that works with both formats.
+/* bmp decoder function grabs a .bmp file, and decodes it, by storing the bmp and dib
+ * headers in a structure, and saving the pixel array into a seperate file.
+ * */
 void bmp_decoder(FILE *src_ptr, FILE *dest_ptr, bmp_header_t **pBmp) {	
 	
-	BYTE *bytes = read_bytes(src_ptr, 0, 54);
+	BYTE *bytes = read_bytes(src_ptr, 0, 138);
 	if(bytes) {
 		// cast bytes into a struct
 		*pBmp = (bmp_header_t*)bytes;
 	}
 	
-	// read pixel array bytes
+	// setting pointer back to the beginning of the file, then read pixel array bytes using the read bytes function
+	fseek(src_ptr, 0, SEEK_SET);
 	BYTE *pixel_arr_bytes = read_bytes(src_ptr, (*pBmp)->pixel_array_off, (*pBmp)->raw_data_size);
 	if(pixel_arr_bytes) {
-		// calc the row size 
-		int row = calc_rowsize((*pBmp)->bpp, (*pBmp)->width, (*pBmp)->height);
-		
-		// use the row size to cal array size
+		// calc the row size and array size using row size and array size functions 
+		int row = calc_rowsize((*pBmp)->bpp, (*pBmp)->width);
 		int array_size = calc_arraysize(row, (*pBmp)->height);
 		
-		// store pixel array bytes into dest file
+		// writing the pixel array into the dest file
 		fwrite(pixel_arr_bytes, array_size, 1, dest_ptr);
 	}
 	
-	// free the memory allocation
+	// freeing memory allocation for the pixel array size.
 	free(pixel_arr_bytes);
 }
 
 int bmp_encoder(FILE *src_ptr, bmp_header_t *pBmp) {
-	// Add struct data to a dest file, next add raw pixel data.
+	//TODO: Add struct data to a dest file, next add raw pixel data.
 	
 	FILE* dest_ptr;
 	
@@ -122,32 +156,26 @@ int bmp_encoder(FILE *src_ptr, bmp_header_t *pBmp) {
 	if(NULL == dest_ptr)
 		return 1;
 	
-	// print data from the struct
-	printf("%02x\n", pBmp->id);
-	printf("%02x\n", pBmp->bmp_size);
-	printf("%02x\n", pBmp->app_spec);
-	printf("%02x\n", pBmp->app_spec2);
-	printf("%02x\n", pBmp->pixel_array_off);
-	printf("%02x\n", pBmp->dib_header_bytes);
-	printf("%02x\n", pBmp->width);
-	printf("%02x\n", pBmp->height);
-	printf("%02x\n", pBmp->colorplanes);
-	printf("%02x\n", pBmp->bpp);
-	printf("%02x\n", pBmp->compression);
-	printf("%02x\n", pBmp->raw_data_size);
-	printf("%02x\n", pBmp->image_res_hori);
-	printf("%02x\n", pBmp->image_res_vert);
-	printf("%02x\n", pBmp->ncolors_palette);
-	printf("%02x\n", pBmp->important_colors);
-	
-	int row = calc_rowsize(pBmp->bpp, pBmp->width, pBmp->height);
+	int row = calc_rowsize(pBmp->bpp, pBmp->width);
 	int array_size = calc_arraysize(row, pBmp->height);
 		
 	pBmp->pixel_array_off = sizeof(bmp_header);
 		
 	// write header to dest file
 	fwrite(pBmp, sizeof(bmp_header), 1, dest_ptr);
-	fwrite(src_ptr, array_size, 1, dest_ptr);
+	
+	// write pixel array to dest file
+	int n_read, n_written;
+	char buff[array_size];
+	do {
+		n_read = fread(buff, 1, array_size, src_ptr);
+		if(n_read)
+			n_written = fwrite(buff, 1, n_read, dest_ptr);
+		else
+			n_written = 0;
+	} while ((n_read > 0) && (n_read == n_written));
+	
+	//fwrite(src_ptr, array_size, 1, dest_ptr);
 	
 	// closing file
 	fclose(dest_ptr);
@@ -161,21 +189,24 @@ int main(int argc, char **argv)
 	FILE* ptr_bmp;
 	FILE* ptr_qoi;
 	FILE* ptr_rawpixeldata;
+	FILE* ptr_rawpixeldata_r;
 	
 	bmp_header_t* pBmp;
 	
 	// Opening files
-	ptr_bmp = fopen(FILEBMP, "r");
-	ptr_qoi = fopen(FILEQOI, "r");
-	ptr_rawpixeldata = fopen(RAWPIXELDATA, "w+");
-	if(NULL == ptr_bmp || NULL == ptr_rawpixeldata || NULL == ptr_qoi)
-		return 1;	
+	ptr_bmp = fopen(FILEBMP, "rb");
+	ptr_qoi = fopen(FILEQOI, "rb");
+	ptr_rawpixeldata = fopen(RAWPIXELDATA, "wb");
+	ptr_rawpixeldata_r = fopen(RAWPIXELDATA, "rb");
+	if(NULL == ptr_bmp || NULL == ptr_rawpixeldata || NULL == ptr_qoi || NULL == ptr_rawpixeldata_r)
+		return 1;
 	
 	// Encoding/Decoding operations
 	bmp_decoder(ptr_bmp, ptr_rawpixeldata, &pBmp);	
-	bmp_encoder(ptr_rawpixeldata, pBmp);
+	bmp_encoder(ptr_rawpixeldata_r, pBmp);
 	
 	// Closing files.
+	fclose(ptr_rawpixeldata_r);
 	fclose(ptr_rawpixeldata);
 	fclose(ptr_qoi);
 	fclose(ptr_bmp);
