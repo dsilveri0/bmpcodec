@@ -201,9 +201,16 @@ int main(int argc, char **argv)
 	if(NULL == ptr_bmp || NULL == ptr_rawpixeldata || NULL == ptr_qoi || NULL == ptr_rawpixeldata_r)
 		return 1;
 	
-	// Encoding/Decoding operations
-	bmp_decoder(ptr_bmp, ptr_rawpixeldata, &pBmp);	
+	// Encoding/Decoding operations for the bmp format
+	bmp_decoder(ptr_bmp, ptr_rawpixeldata, &pBmp);
 	bmp_encoder(ptr_rawpixeldata_r, pBmp);
+	
+	// Encoding/Decoding operations for the qoi format	
+	/* TODO
+	 * Create the qoi encoder and decoder
+	 * Create a function bmp->qoi converter that receives a bmp file and converts it to a qoi file.
+	 * Create a function qoi->bmp converter that receives a qoi file and converts it to a bmp file.
+	*/ 
 	
 	// Closing files.
 	fclose(ptr_rawpixeldata_r);
