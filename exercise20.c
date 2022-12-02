@@ -93,29 +93,38 @@ int calc_arraysize(int row_size, int image_height) {
 /* Read bytes function reads X amount of bytes from a file
  * it receives a file a starting byte and an ending byte.
  * */
+ 
 BYTE *read_bytes(FILE *ptr, int start_byte, int end_byte) {
-	int i,j;
-	unsigned int ch;
+	int i,k;
+	int ch;
 	// calculating the difference between the start and end bytes and 
 	// allocating it as memory for the bytes buffer
 	int size = abs(end_byte-start_byte);
 	BYTE *bytes = malloc(size);
-	
-	if(!bytes)
+	printf("\n%p\n", bytes);
+	if(bytes == NULL)
 		return NULL;
+		
+	// seeking start_byte on the file then iterating from start byte until end 
+	// byte has been reached or EOF. Storing the bytes in the bytes buffer.
 	
-	// reading the first char of the file and then iterating until end 
-	// byte has been reached or EOF. If start byte is reached, that byte
-	// is stored in the bytes buffer.
+	fseek(ptr, start_byte, SEEK_SET);
 	ch = fgetc(ptr);
-	for(i=0, j=0;i<end_byte && ch < EOF;i++) {
-		if(i >= start_byte) {
-			bytes[j] = ch;
-			j++;
-		}			
+	
+	for(i=start_byte, k=0;i<end_byte && ch != EOF;i++) {
+		bytes[k] = ch;
+		k++;	
 		ch = fgetc(ptr);
 	}
 	
+	if(ch == EOF){
+		if(ferror(ptr)) {
+			perror("Error reading.");
+			free(bytes);
+			return NULL;
+		}
+	}
+
 	return bytes;
 }
 
@@ -143,7 +152,7 @@ void bmp_decoder(FILE *src_ptr, FILE *dest_ptr, bmp_header_t **pBmp) {
 	}
 	
 	// freeing memory allocation for the pixel array size.
-	free(pixel_arr_bytes);
+	free(pixel_arr_bytes);	
 }
 
 int bmp_encoder(FILE *src_ptr, bmp_header_t *pBmp) {
@@ -184,10 +193,10 @@ int bmp_encoder(FILE *src_ptr, bmp_header_t *pBmp) {
 }
 
 
-int main(int argc, char **argv)
-{
+int main(int argc, char **argv) {
+	
 	FILE* ptr_bmp;
-	FILE* ptr_qoi;
+	//FILE* ptr_qoi;
 	FILE* ptr_rawpixeldata;
 	FILE* ptr_rawpixeldata_r;
 	
@@ -195,10 +204,10 @@ int main(int argc, char **argv)
 	
 	// Opening files
 	ptr_bmp = fopen(FILEBMP, "rb");
-	ptr_qoi = fopen(FILEQOI, "rb");
+	//ptr_qoi = fopen(FILEQOI, "rb");
 	ptr_rawpixeldata = fopen(RAWPIXELDATA, "wb");
 	ptr_rawpixeldata_r = fopen(RAWPIXELDATA, "rb");
-	if(NULL == ptr_bmp || NULL == ptr_rawpixeldata || NULL == ptr_qoi || NULL == ptr_rawpixeldata_r)
+	if(NULL == ptr_bmp || NULL == ptr_rawpixeldata /*|| NULL == ptr_qoi*/ || NULL == ptr_rawpixeldata_r)
 		return 1;
 	
 	// Encoding/Decoding operations for the bmp format
@@ -215,7 +224,7 @@ int main(int argc, char **argv)
 	// Closing files.
 	fclose(ptr_rawpixeldata_r);
 	fclose(ptr_rawpixeldata);
-	fclose(ptr_qoi);
+	//fclose(ptr_qoi);
 	fclose(ptr_bmp);
 	
 	// Free memory allocation
