@@ -27,6 +27,7 @@
 #define FILEBMP "insanecat.bmp"
 #define FILEQOI "insanecat.qoi"
 #define RAWPIXELDATA "rawpixeldata"
+#define BMPENCODED "bmpencoded.bmp"
 
 typedef unsigned char BYTE;
 
@@ -101,13 +102,12 @@ BYTE *read_bytes(FILE *ptr, int start_byte, int end_byte) {
 	// allocating it as memory for the bytes buffer
 	int size = abs(end_byte-start_byte);
 	BYTE *bytes = malloc(size);
-	printf("\n%p\n", bytes);
+	
 	if(bytes == NULL)
 		return NULL;
 		
 	// seeking start_byte on the file then iterating from start byte until end 
 	// byte has been reached or EOF. Storing the bytes in the bytes buffer.
-	
 	fseek(ptr, start_byte, SEEK_SET);
 	ch = fgetc(ptr);
 	
@@ -117,6 +117,7 @@ BYTE *read_bytes(FILE *ptr, int start_byte, int end_byte) {
 		ch = fgetc(ptr);
 	}
 	
+	// if there was an error reading, printing error and freeing bytes allocation.
 	if(ch == EOF){
 		if(ferror(ptr)) {
 			perror("Error reading.");
@@ -124,6 +125,10 @@ BYTE *read_bytes(FILE *ptr, int start_byte, int end_byte) {
 			return NULL;
 		}
 	}
+	
+	// if bytes requested weren't all read, printing error informing that
+	if(size != k)
+		perror("Couldn't read all requested bytes");
 
 	return bytes;
 }
@@ -131,60 +136,85 @@ BYTE *read_bytes(FILE *ptr, int start_byte, int end_byte) {
 /* bmp decoder function grabs a .bmp file, and decodes it, by storing the bmp and dib
  * headers in a structure, and saving the pixel array into a seperate file.
  * */
-void bmp_decoder(FILE *src_ptr, FILE *dest_ptr, bmp_header_t **pBmp) {	
-	
-	BYTE *bytes = read_bytes(src_ptr, 0, 138);
-	if(bytes) {
-		// cast bytes into a struct
-		*pBmp = (bmp_header_t*)bytes;
+void bmp_decoder(FILE *src_ptr, FILE *dest_ptr, bmp_header_t **pBmp) {
+	// Reading the BMP header's first 14 bytes.
+	BYTE *header = read_bytes(src_ptr, 0, 14);
+	if(header) {
+		// Verifying the size of the header based on the pixel array offset value and 
+		// casting the header bytes into a struct
+		*pBmp = (bmp_header_t*)header;
+		BYTE *bytes = read_bytes(src_ptr, 0, (*pBmp)->pixel_array_off);
+		if(bytes)
+			*pBmp = (bmp_header_t*)bytes;
 	}
 	
 	// setting pointer back to the beginning of the file, then read pixel array bytes using the read bytes function
 	fseek(src_ptr, 0, SEEK_SET);
-	BYTE *pixel_arr_bytes = read_bytes(src_ptr, (*pBmp)->pixel_array_off, (*pBmp)->raw_data_size);
+	BYTE *pixel_arr_bytes = read_bytes(src_ptr, (*pBmp)->pixel_array_off, (*pBmp)->bmp_size);
 	if(pixel_arr_bytes) {
 		// calc the row size and array size using row size and array size functions 
 		int row = calc_rowsize((*pBmp)->bpp, (*pBmp)->width);
 		int array_size = calc_arraysize(row, (*pBmp)->height);
 		
 		// writing the pixel array into the dest file
-		fwrite(pixel_arr_bytes, array_size, 1, dest_ptr);
+		int count = 1;
+		int n_obj = fwrite(pixel_arr_bytes, array_size, count, dest_ptr);
+		if(n_obj != count) {
+			//error occurred writing to file
+			perror("Error occurred decoding file");
+		}
 	}
 	
 	// freeing memory allocation for the pixel array size.
-	free(pixel_arr_bytes);	
+	if(pixel_arr_bytes != NULL)
+		free(pixel_arr_bytes);
 }
 
-int bmp_encoder(FILE *src_ptr, bmp_header_t *pBmp) {
-	//TODO: Add struct data to a dest file, next add raw pixel data.
-	
+int bmp_encoder(FILE *src_ptr, bmp_header_t *pBmp) {	
 	FILE* dest_ptr;
 	
-	// opening file
-	dest_ptr = fopen("bmpencoded", "wb");
+	// opening file in write mode
+	dest_ptr = fopen(BMPENCODED, "wb");
 	if(NULL == dest_ptr)
 		return 1;
 	
+	// calculating row and array sizes
 	int row = calc_rowsize(pBmp->bpp, pBmp->width);
 	int array_size = calc_arraysize(row, pBmp->height);
 		
 	pBmp->pixel_array_off = sizeof(bmp_header);
 		
-	// write header to dest file
-	fwrite(pBmp, sizeof(bmp_header), 1, dest_ptr);
+	// writing header to dest file
+		int count = 1;
+		int n_obj = fwrite(pBmp, sizeof(bmp_header), count, dest_ptr);
+		if(n_obj != count) {
+			//error occurred writing to file
+			perror("Error occurred encoding file");
+			return 1;
+		}
 	
 	// write pixel array to dest file
 	int n_read, n_written;
 	char buff[array_size];
-	do {
-		n_read = fread(buff, 1, array_size, src_ptr);
-		if(n_read)
-			n_written = fwrite(buff, 1, n_read, dest_ptr);
-		else
-			n_written = 0;
-	} while ((n_read > 0) && (n_read == n_written));
 	
-	//fwrite(src_ptr, array_size, 1, dest_ptr);
+	// seeking beginning of file before reading 
+	// then reading the contents until array_size is reached
+	fseek(src_ptr, 0, SEEK_SET);
+	n_read = fread(buff, 1, array_size, src_ptr);
+	
+	// if number of bytes read is equal to the array size, write the buffer to dest file
+	if(n_read == array_size){
+		n_written = fwrite(buff, 1, n_read, dest_ptr);
+		// error handling in case number of bytes read and written are different
+		if(n_written != n_read)
+			perror("Error occurred encoding file");
+	} else {
+		// error handling in case number of bytes read is different from the array size
+		if (feof(src_ptr))
+			printf("Unexpected EOF.");
+		else if (ferror(src_ptr))
+			printf("Error occurred.");
+	}
 	
 	// closing file
 	fclose(dest_ptr);
@@ -198,21 +228,19 @@ int main(int argc, char **argv) {
 	FILE* ptr_bmp;
 	//FILE* ptr_qoi;
 	FILE* ptr_rawpixeldata;
-	FILE* ptr_rawpixeldata_r;
 	
 	bmp_header_t* pBmp;
 	
 	// Opening files
 	ptr_bmp = fopen(FILEBMP, "rb");
 	//ptr_qoi = fopen(FILEQOI, "rb");
-	ptr_rawpixeldata = fopen(RAWPIXELDATA, "wb");
-	ptr_rawpixeldata_r = fopen(RAWPIXELDATA, "rb");
-	if(NULL == ptr_bmp || NULL == ptr_rawpixeldata /*|| NULL == ptr_qoi*/ || NULL == ptr_rawpixeldata_r)
+	ptr_rawpixeldata = fopen(RAWPIXELDATA, "wb+");
+	if(NULL == ptr_bmp || NULL == ptr_rawpixeldata /*|| NULL == ptr_qoi*/)
 		return 1;
 	
 	// Encoding/Decoding operations for the bmp format
 	bmp_decoder(ptr_bmp, ptr_rawpixeldata, &pBmp);
-	bmp_encoder(ptr_rawpixeldata_r, pBmp);
+	bmp_encoder(ptr_rawpixeldata, pBmp);
 	
 	// Encoding/Decoding operations for the qoi format	
 	/* TODO
@@ -222,7 +250,6 @@ int main(int argc, char **argv) {
 	*/ 
 	
 	// Closing files.
-	fclose(ptr_rawpixeldata_r);
 	fclose(ptr_rawpixeldata);
 	//fclose(ptr_qoi);
 	fclose(ptr_bmp);
