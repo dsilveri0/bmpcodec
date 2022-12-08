@@ -1,25 +1,3 @@
-/*
- * exercise20.c
- * 
- * Copyright 2022 David <dsilverio@endeavour>
- * 
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- * 
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- * 
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
- * MA 02110-1301, USA.
- * 
- * 
- */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,6 +6,7 @@
 #define FILEQOI "insanecat.qoi"
 #define RAWPIXELDATA "rawpixeldata"
 #define BMPENCODED "bmpencoded.bmp"
+#define QOIENCODED "qoi.bmp"
 
 typedef unsigned char BYTE;
 
@@ -72,6 +51,16 @@ typedef struct {
 	int v5_reserved;
 } bmp_header, bmp_header_t;
 
+
+#pragma pack(1)
+typedef struct { 
+	int id;
+	int width;
+	int height;
+	char channels;
+	char colour_space;
+} qoi_header, qoi_header_t;
+
 int calc_rowsize(int bpp, int image_width) {
 	// calculating row size based on docs formula
 	int row_size = (bpp*image_width)/8;
@@ -95,7 +84,7 @@ int calc_arraysize(int row_size, int image_height) {
  * it receives a file a starting byte and an ending byte.
  * */
  
-BYTE *read_bytes(FILE *ptr, int start_byte, int end_byte) {
+BYTE *read_bytes(FILE *ptr, int start_byte, int end_byte, int *readbytes) {
 	int i,k;
 	int ch;
 	// calculating the difference between the start and end bytes and 
@@ -117,6 +106,9 @@ BYTE *read_bytes(FILE *ptr, int start_byte, int end_byte) {
 		ch = fgetc(ptr);
 	}
 	
+	*readbytes = k;
+	bytes = realloc(bytes, k);
+	
 	// if there was an error reading, printing error and freeing bytes allocation.
 	if(ch == EOF){
 		if(ferror(ptr)) {
@@ -137,20 +129,22 @@ BYTE *read_bytes(FILE *ptr, int start_byte, int end_byte) {
  * headers in a structure, and saving the pixel array into a seperate file.
  * */
 void bmp_decoder(FILE *src_ptr, FILE *dest_ptr, bmp_header_t **pBmp) {
+	int bytesread = 0;
+	
 	// Reading the BMP header's first 14 bytes.
-	BYTE *header = read_bytes(src_ptr, 0, 14);
+	BYTE *header = read_bytes(src_ptr, 0, 14, &bytesread);
 	if(header) {
 		// Verifying the size of the header based on the pixel array offset value and 
 		// casting the header bytes into a struct
 		*pBmp = (bmp_header_t*)header;
-		BYTE *bytes = read_bytes(src_ptr, 0, (*pBmp)->pixel_array_off);
+		BYTE *bytes = read_bytes(src_ptr, 0, (*pBmp)->pixel_array_off, &bytesread);
 		if(bytes)
 			*pBmp = (bmp_header_t*)bytes;
 	}
 	
 	// setting pointer back to the beginning of the file, then read pixel array bytes using the read bytes function
 	fseek(src_ptr, 0, SEEK_SET);
-	BYTE *pixel_arr_bytes = read_bytes(src_ptr, (*pBmp)->pixel_array_off, (*pBmp)->bmp_size);
+	BYTE *pixel_arr_bytes = read_bytes(src_ptr, (*pBmp)->pixel_array_off, (*pBmp)->bmp_size, &bytesread);
 	if(pixel_arr_bytes) {
 		// calc the row size and array size using row size and array size functions 
 		int row = calc_rowsize((*pBmp)->bpp, (*pBmp)->width);
@@ -223,39 +217,71 @@ int bmp_encoder(FILE *src_ptr, bmp_header_t *pBmp) {
 }
 
 
+void qoi_decoder(FILE *src_ptr, FILE *dest_ptr, qoi_header_t **pQoi) {
+	int bytesread = 0;
+	
+	BYTE *bytes = read_bytes(src_ptr, 0, 14, &bytesread);
+	if(bytes) {
+		*pQoi = (qoi_header_t*)bytes;
+	}
+	
+	fseek(src_ptr, 0, SEEK_SET);
+	BYTE *pixel_arr_bytes = read_bytes(src_ptr, 14, 50000, &bytesread);
+	if(pixel_arr_bytes) {
+		int count = 1;
+		int n_obj = fwrite(pixel_arr_bytes, 50000, count, dest_ptr);
+		if(n_obj != count) {
+			//error occurred writing to file
+			perror("Error occurred decoding file");
+		}
+	}
+	
+}
+
+int qoi_encoder(FILE *src_ptr, qoi_header_t *pQoi) { 
+	// Encoder stuff goes here.
+	return 0; 
+}
+
+
 int main(int argc, char **argv) {
 	
 	FILE* ptr_bmp;
-	//FILE* ptr_qoi;
+	FILE* ptr_qoi;
 	FILE* ptr_rawpixeldata;
 	
 	bmp_header_t* pBmp;
+	qoi_header_t* pQoi;
 	
 	// Opening files
 	ptr_bmp = fopen(FILEBMP, "rb");
-	//ptr_qoi = fopen(FILEQOI, "rb");
+	ptr_qoi = fopen(FILEQOI, "rb");
 	ptr_rawpixeldata = fopen(RAWPIXELDATA, "wb+");
-	if(NULL == ptr_bmp || NULL == ptr_rawpixeldata /*|| NULL == ptr_qoi*/)
+	if(NULL == ptr_bmp || NULL == ptr_rawpixeldata || NULL == ptr_qoi)
 		return 1;
 	
 	// Encoding/Decoding operations for the bmp format
-	bmp_decoder(ptr_bmp, ptr_rawpixeldata, &pBmp);
-	bmp_encoder(ptr_rawpixeldata, pBmp);
+	//bmp_decoder(ptr_bmp, ptr_rawpixeldata, &pBmp);
+	//bmp_encoder(ptr_rawpixeldata, pBmp);
 	
 	// Encoding/Decoding operations for the qoi format	
+	qoi_decoder(ptr_qoi, ptr_rawpixeldata, &pQoi);
+	//qoi_encoder(ptr_rawpixeldata, pQoi);
+	
 	/* TODO
-	 * Create the qoi encoder and decoder
 	 * Create a function bmp->qoi converter that receives a bmp file and converts it to a qoi file.
 	 * Create a function qoi->bmp converter that receives a qoi file and converts it to a bmp file.
+	 * Separate code into different files, and create a seperate .h file to declare functions
 	*/ 
 	
 	// Closing files.
 	fclose(ptr_rawpixeldata);
-	//fclose(ptr_qoi);
+	fclose(ptr_qoi);
 	fclose(ptr_bmp);
 	
 	// Free memory allocation
 	free(pBmp);
+	free(pQoi);
 	
 	return 0;
 }
