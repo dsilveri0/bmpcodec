@@ -219,23 +219,58 @@ int bmp_encoder(FILE *src_ptr, bmp_header_t *pBmp) {
 
 void qoi_decoder(FILE *src_ptr, FILE *dest_ptr, qoi_header_t **pQoi) {
 	int bytesread = 0;
+	int rgb_header_m = 0b11111110;
+	int two_header_m = 0b11000000;
+	int six_body_m = 0b00111111;
+	int diff_dr_m = 0b00110000;
+	int diff_dg_m = 0b00001100;
+	int diff_db_m = 0b00000011;
 	
 	BYTE *bytes = read_bytes(src_ptr, 0, 14, &bytesread);
-	if(bytes) {
+	if(bytes)
 		*pQoi = (qoi_header_t*)bytes;
-	}
 	
 	fseek(src_ptr, 0, SEEK_SET);
-	BYTE *pixel_arr_bytes = read_bytes(src_ptr, 14, 50000, &bytesread);
+	BYTE *pixel_arr_bytes = read_bytes(src_ptr, 14, 50000, &bytesread); //change so it goes till end byte of file.
+	
+	for(int i = 0; i<600; i++) {
+		int rgb_header_masked = pixel_arr_bytes[i] & rgb_header_m;
+		int two_header_masked = pixel_arr_bytes[i] & two_header_m;
+		int six_body_masked = pixel_arr_bytes[i] & six_body_m;
+		
+		if(rgb_header_masked & rgb_header_m)
+			printf("%02x:%02x\n", pixel_arr_bytes[i], rgb_header_masked);
+		//else if(two_header_masked & two_header_m)
+		//	printf("%02x:%02x+%02x\n", pixel_arr_bytes[i], two_header_masked, six_body_masked);
+	
+	
+	
+	
+	
+	}
+	
+	
+	
+	
 	if(pixel_arr_bytes) {
 		int count = 1;
-		int n_obj = fwrite(pixel_arr_bytes, 50000, count, dest_ptr);
+		int n_obj = fwrite(pixel_arr_bytes, 50000, count, dest_ptr); //change so it goes till end byte of file.
 		if(n_obj != count) {
 			//error occurred writing to file
 			perror("Error occurred decoding file");
 		}
 	}
 	
+	/* TODO:
+	 * 
+	 * Gotta decode pixel array into general use pixel array.
+	 * Decode RLE of previous pixel in QOI_OP_RUN
+	 * Seems like pixel array's first pixel is Full RGB QOI_OP_RGB, followed by RLE of previous pixel? QOI_OP_RUN
+	 * then an index into the array of previously seen pixels? QOI_OP_INDEX, next DIFF compared to previous pixels? QOI_OP_DIFF
+	 * and then back to FULL RGB, QOI_OP_RGB
+	 * 
+	 * Verify how the pixel data is actually structured.
+	*/
 }
 
 int qoi_encoder(FILE *src_ptr, qoi_header_t *pQoi) { 
