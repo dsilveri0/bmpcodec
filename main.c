@@ -53,7 +53,7 @@ typedef struct {
 
 
 #pragma pack(1)
-typedef struct { 
+typedef struct {
 	int id;
 	int width;
 	int height;
@@ -64,14 +64,14 @@ typedef struct {
 int calc_rowsize(int bpp, int image_width) {
 	// calculating row size based on docs formula
 	int row_size = (bpp*image_width)/8;
-	
-	// aligning row to a multiple of 4 if its not aligned 
+
+	// aligning row to a multiple of 4 if its not aligned
 	// by adding the necessary bytes as padding
 	if(row_size%4!=0){
 		int align = 4-row_size%4;
 		row_size += align;
 	}
-	
+
 	return row_size;
 }
 
@@ -83,32 +83,32 @@ int calc_arraysize(int row_size, int image_height) {
 /* Read bytes function reads X amount of bytes from a file
  * it receives a file a starting byte and an ending byte.
  * */
- 
+
 BYTE *read_bytes(FILE *ptr, int start_byte, int end_byte, int *readbytes) {
 	int i,k;
 	int ch;
-	// calculating the difference between the start and end bytes and 
+	// calculating the difference between the start and end bytes and
 	// allocating it as memory for the bytes buffer
 	int size = abs(end_byte-start_byte);
 	BYTE *bytes = malloc(size);
-	
+
 	if(bytes == NULL)
 		return NULL;
-		
-	// seeking start_byte on the file then iterating from start byte until end 
+
+	// seeking start_byte on the file then iterating from start byte until end
 	// byte has been reached or EOF. Storing the bytes in the bytes buffer.
 	fseek(ptr, start_byte, SEEK_SET);
 	ch = fgetc(ptr);
-	
+
 	for(i=start_byte, k=0;i<end_byte && ch != EOF;i++) {
 		bytes[k] = ch;
-		k++;	
+		k++;
 		ch = fgetc(ptr);
 	}
-	
+
 	*readbytes = k;
 	bytes = realloc(bytes, k);
-	
+
 	// if there was an error reading, printing error and freeing bytes allocation.
 	if(ch == EOF){
 		if(ferror(ptr)) {
@@ -117,7 +117,7 @@ BYTE *read_bytes(FILE *ptr, int start_byte, int end_byte, int *readbytes) {
 			return NULL;
 		}
 	}
-	
+
 	// if bytes requested weren't all read, printing error informing that
 	if(size != k)
 		perror("Couldn't read all requested bytes");
@@ -130,26 +130,26 @@ BYTE *read_bytes(FILE *ptr, int start_byte, int end_byte, int *readbytes) {
  * */
 void bmp_decoder(FILE *src_ptr, FILE *dest_ptr, bmp_header_t **pBmp) {
 	int bytesread = 0;
-	
+
 	// Reading the BMP header's first 14 bytes.
 	BYTE *header = read_bytes(src_ptr, 0, 14, &bytesread);
 	if(header) {
-		// Verifying the size of the header based on the pixel array offset value and 
+		// Verifying the size of the header based on the pixel array offset value and
 		// casting the header bytes into a struct
 		*pBmp = (bmp_header_t*)header;
 		BYTE *bytes = read_bytes(src_ptr, 0, (*pBmp)->pixel_array_off, &bytesread);
 		if(bytes)
 			*pBmp = (bmp_header_t*)bytes;
 	}
-	
+
 	// setting pointer back to the beginning of the file, then read pixel array bytes using the read bytes function
 	fseek(src_ptr, 0, SEEK_SET);
 	BYTE *pixel_arr_bytes = read_bytes(src_ptr, (*pBmp)->pixel_array_off, (*pBmp)->bmp_size, &bytesread);
 	if(pixel_arr_bytes) {
-		// calc the row size and array size using row size and array size functions 
+		// calc the row size and array size using row size and array size functions
 		int row = calc_rowsize((*pBmp)->bpp, (*pBmp)->width);
 		int array_size = calc_arraysize(row, (*pBmp)->height);
-		
+
 		// writing the pixel array into the dest file
 		int count = 1;
 		int n_obj = fwrite(pixel_arr_bytes, array_size, count, dest_ptr);
@@ -158,26 +158,26 @@ void bmp_decoder(FILE *src_ptr, FILE *dest_ptr, bmp_header_t **pBmp) {
 			perror("Error occurred decoding file");
 		}
 	}
-	
+
 	// freeing memory allocation for the pixel array size.
 	if(pixel_arr_bytes != NULL)
 		free(pixel_arr_bytes);
 }
 
-int bmp_encoder(FILE *src_ptr, bmp_header_t *pBmp) {	
+int bmp_encoder(FILE *src_ptr, bmp_header_t *pBmp) {
 	FILE* dest_ptr;
-	
+
 	// opening file in write mode
 	dest_ptr = fopen(BMPENCODED, "wb");
 	if(NULL == dest_ptr)
 		return 1;
-	
+
 	// calculating row and array sizes
 	int row = calc_rowsize(pBmp->bpp, pBmp->width);
 	int array_size = calc_arraysize(row, pBmp->height);
-		
+
 	pBmp->pixel_array_off = sizeof(bmp_header);
-		
+
 	// writing header to dest file
 		int count = 1;
 		int n_obj = fwrite(pBmp, sizeof(bmp_header), count, dest_ptr);
@@ -186,16 +186,16 @@ int bmp_encoder(FILE *src_ptr, bmp_header_t *pBmp) {
 			perror("Error occurred encoding file");
 			return 1;
 		}
-	
+
 	// write pixel array to dest file
 	int n_read, n_written;
 	char buff[array_size];
-	
-	// seeking beginning of file before reading 
+
+	// seeking beginning of file before reading
 	// then reading the contents until array_size is reached
 	fseek(src_ptr, 0, SEEK_SET);
 	n_read = fread(buff, 1, array_size, src_ptr);
-	
+
 	// if number of bytes read is equal to the array size, write the buffer to dest file
 	if(n_read == array_size){
 		n_written = fwrite(buff, 1, n_read, dest_ptr);
@@ -209,10 +209,10 @@ int bmp_encoder(FILE *src_ptr, bmp_header_t *pBmp) {
 		else if (ferror(src_ptr))
 			printf("Error occurred.");
 	}
-	
+
 	// closing file
 	fclose(dest_ptr);
-	
+
 	return 0;
 }
 
@@ -225,33 +225,33 @@ void qoi_decoder(FILE *src_ptr, FILE *dest_ptr, qoi_header_t **pQoi) {
 	int diff_dr_m = 0b00110000;
 	int diff_dg_m = 0b00001100;
 	int diff_db_m = 0b00000011;
-	
+
 	BYTE *bytes = read_bytes(src_ptr, 0, 14, &bytesread);
 	if(bytes)
 		*pQoi = (qoi_header_t*)bytes;
-	
+
 	fseek(src_ptr, 0, SEEK_SET);
 	BYTE *pixel_arr_bytes = read_bytes(src_ptr, 14, 50000, &bytesread); //change so it goes till end byte of file.
-	
+
 	for(int i = 0; i<600; i++) {
 		int rgb_header_masked = pixel_arr_bytes[i] & rgb_header_m;
 		int two_header_masked = pixel_arr_bytes[i] & two_header_m;
 		int six_body_masked = pixel_arr_bytes[i] & six_body_m;
-		
+
 		if(rgb_header_masked & rgb_header_m)
 			printf("%02x:%02x\n", pixel_arr_bytes[i], rgb_header_masked);
 		//else if(two_header_masked & two_header_m)
 		//	printf("%02x:%02x+%02x\n", pixel_arr_bytes[i], two_header_masked, six_body_masked);
-	
-	
-	
-	
-	
+
+
+
+
+
 	}
-	
-	
-	
-	
+
+
+
+
 	if(pixel_arr_bytes) {
 		int count = 1;
 		int n_obj = fwrite(pixel_arr_bytes, 50000, count, dest_ptr); //change so it goes till end byte of file.
@@ -260,63 +260,64 @@ void qoi_decoder(FILE *src_ptr, FILE *dest_ptr, qoi_header_t **pQoi) {
 			perror("Error occurred decoding file");
 		}
 	}
-	
+
 	/* TODO:
-	 * 
+	 *
 	 * Gotta decode pixel array into general use pixel array.
 	 * Decode RLE of previous pixel in QOI_OP_RUN
 	 * Seems like pixel array's first pixel is Full RGB QOI_OP_RGB, followed by RLE of previous pixel? QOI_OP_RUN
 	 * then an index into the array of previously seen pixels? QOI_OP_INDEX, next DIFF compared to previous pixels? QOI_OP_DIFF
 	 * and then back to FULL RGB, QOI_OP_RGB
-	 * 
+	 *
 	 * Verify how the pixel data is actually structured.
 	*/
 }
 
-int qoi_encoder(FILE *src_ptr, qoi_header_t *pQoi) { 
+int qoi_encoder(FILE *src_ptr, qoi_header_t *pQoi) {
 	// Encoder stuff goes here.
-	return 0; 
+	return 0;
 }
 
 
 int main(int argc, char **argv) {
-	
+
 	FILE* ptr_bmp;
 	FILE* ptr_qoi;
 	FILE* ptr_rawpixeldata;
-	
+
 	bmp_header_t* pBmp;
 	qoi_header_t* pQoi;
-	
+
 	// Opening files
 	ptr_bmp = fopen(FILEBMP, "rb");
 	ptr_qoi = fopen(FILEQOI, "rb");
 	ptr_rawpixeldata = fopen(RAWPIXELDATA, "wb+");
 	if(NULL == ptr_bmp || NULL == ptr_rawpixeldata || NULL == ptr_qoi)
 		return 1;
-	
+
 	// Encoding/Decoding operations for the bmp format
 	//bmp_decoder(ptr_bmp, ptr_rawpixeldata, &pBmp);
 	//bmp_encoder(ptr_rawpixeldata, pBmp);
-	
-	// Encoding/Decoding operations for the qoi format	
+
+	// Encoding/Decoding operations for the qoi format
 	qoi_decoder(ptr_qoi, ptr_rawpixeldata, &pQoi);
 	//qoi_encoder(ptr_rawpixeldata, pQoi);
-	
+
 	/* TODO
+	 * Create an all purpose function that verifies what file is being given and either converts it to qoi or bmp.
 	 * Create a function bmp->qoi converter that receives a bmp file and converts it to a qoi file.
 	 * Create a function qoi->bmp converter that receives a qoi file and converts it to a bmp file.
 	 * Separate code into different files, and create a seperate .h file to declare functions
-	*/ 
-	
+	*/
+
 	// Closing files.
 	fclose(ptr_rawpixeldata);
 	fclose(ptr_qoi);
 	fclose(ptr_bmp);
-	
+
 	// Free memory allocation
 	free(pBmp);
 	free(pQoi);
-	
+
 	return 0;
 }
