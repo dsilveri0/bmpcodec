@@ -61,6 +61,12 @@ typedef struct {
 	char colour_space;
 } qoi_header, qoi_header_t;
 
+// Struct to store RGBA pixel data.
+typedef union {
+    struct { BYTE r, g, b, a;} rgba;
+    unsigned int v;
+} qoi_rgba_t;
+
 int calc_rowsize(int bpp, int image_width) {
 	// calculating row size based on docs formula
 	int row_size = (bpp*image_width)/8;
@@ -82,6 +88,7 @@ int calc_arraysize(int row_size, int image_height) {
 
 /* Read bytes function reads X amount of bytes from a file
  * it receives a file a starting byte and an ending byte.
+ * returns NULL if it errors out reading
  * */
 
 BYTE *read_bytes(FILE *ptr, int start_byte, int end_byte, int *readbytes) {
@@ -107,7 +114,12 @@ BYTE *read_bytes(FILE *ptr, int start_byte, int end_byte, int *readbytes) {
 	}
 
 	*readbytes = k;
-	bytes = realloc(bytes, k); //TODO: if realloc fails, bytes might become NULL - check
+	bytes = realloc(bytes, k);
+
+    // if there's an error with realloc, return null
+    if(bytes == NULL) {
+        return NULL;
+    }
 
 	// if there was an error reading, printing error and freeing bytes' allocation.
 	if(ch == EOF){
@@ -226,7 +238,8 @@ void qoi_decoder(FILE *src_ptr, FILE *dest_ptr, qoi_header_t **pQoi) {
     int diff_header_m = 0b10000000;
     int run_header_m = 0b11000000;
 
-	BYTE *header = read_bytes(src_ptr, 0, 14, &bytesread); //TODO make this work like in the bmp decoder
+    // Header doesn't provide info on where the pixel array starts
+	BYTE *header = read_bytes(src_ptr, 0, 14, &bytesread);
 	if(header) {
         *pQoi = (qoi_header_t*)header;
     }
@@ -235,16 +248,21 @@ void qoi_decoder(FILE *src_ptr, FILE *dest_ptr, qoi_header_t **pQoi) {
     int qoi_size = (*pQoi)->width * (*pQoi)->height * (*pQoi)->channels; //swap end_byte with this value to read the entire file
 
 	BYTE *pixel_arr_bytes = read_bytes(src_ptr, 14, 50000, &bytesread); //change so it goes till end byte of file.
-    BYTE arr_bytes; //todo store values here, probably need a new structure type to store, the values like arr_bytes.rgba.r, g, b, a...
+    qoi_rgba_t RGBA;
 
-	for(int i = 0; i<600; i++) { // todo probably requires me to have a separate variable to loop, and 1 to puts the bytes in the array
+    // TODO improve how I store data
+    // Depending on which mask each byte is, save it to either an array of pixels, channel diff, etc...
+	for(int i = 0; i<bytesread; i++) {
         // verify if rgb or rgba (from the header info) and if its 1 or the other, store the pixels
         if(pixel_arr_bytes[i] == rgb_header_m) {
-            // todo - store rgb values inside the arr_bytes array
-            printf("store rgb");
+            i++;
+            RGBA.rgba.r = pixel_arr_bytes[i++];
+            RGBA.rgba.g = pixel_arr_bytes[i++];
+            RGBA.rgba.b = pixel_arr_bytes[i++];
+
         } else if(pixel_arr_bytes[i] == rgba_header_m) {
             // todo - store rgba values inside the arr_bytes array
-            printf("store rgba");
+            printf("store rgba, increment and move in the array 4 bytes (RGBA)");
         }
 
 		if((pixel_arr_bytes[i] & two_header_m) == index_header_m) {
@@ -314,7 +332,7 @@ int main(int argc, char **argv) {
 	fclose(ptr_bmp);
 
 	// Free memory allocation
-	free(pBmp);
+	//free(pBmp);
 	free(pQoi);
 
 	return 0;
