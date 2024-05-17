@@ -7,6 +7,7 @@
 #define RAWPIXELDATA "rawpixeldata"
 #define BMPENCODED "bmpencoded.bmp"
 #define QOIENCODED "qoi.bmp"
+#define QOI_COLOR_HASH(C) (C.rgba.r*3 + C.rgba.g*5 + C.rgba.b*7 + C.rgba.a*11)
 
 typedef unsigned char BYTE;
 
@@ -117,9 +118,8 @@ BYTE *read_bytes(FILE *ptr, int start_byte, int end_byte, int *readbytes) {
 	bytes = realloc(bytes, k);
 
     // if there's an error with realloc, return null
-    if(bytes == NULL) {
+    if(bytes == NULL)
         return NULL;
-    }
 
 	// if there was an error reading, printing error and freeing bytes' allocation.
 	if(ch == EOF){
@@ -231,12 +231,15 @@ int bmp_encoder(FILE *src_ptr, bmp_header_t *pBmp) {
 
 void qoi_decoder(FILE *src_ptr, FILE *dest_ptr, qoi_header_t **pQoi) {
 	int bytesread = 0;
+    int run_length = 0;
 	int rgb_header_m = 0b11111110;
     int rgba_header_m = 0b11111111;
 	int two_header_m = 0b11000000;
     int index_header_m = 0b01000000;
     int diff_header_m = 0b10000000;
     int run_header_m = 0b11000000;
+    int run_length_m = 0b00111111;
+    qoi_rgba_t index[64];
 
     // Header doesn't provide info on where the pixel array starts
 	BYTE *header = read_bytes(src_ptr, 0, 14, &bytesread);
@@ -245,13 +248,12 @@ void qoi_decoder(FILE *src_ptr, FILE *dest_ptr, qoi_header_t **pQoi) {
     }
 
 	fseek(src_ptr, 0, SEEK_SET);
-    int qoi_size = (*pQoi)->width * (*pQoi)->height * (*pQoi)->channels; //swap end_byte with this value to read the entire file
+    int qoi_size = (*pQoi)->width * (*pQoi)->height * (*pQoi)->channels; //todo swap end_byte with this value to read the entire file
 
-	BYTE *pixel_arr_bytes = read_bytes(src_ptr, 14, 50000, &bytesread); //change so it goes till end byte of file.
+	BYTE *pixel_arr_bytes = read_bytes(src_ptr, 14, 50000, &bytesread); //todo change so it goes till end byte of file.
     qoi_rgba_t RGBA;
+    BYTE *final_arr_bytes;
 
-    // TODO improve how I store data
-    // Depending on which mask each byte is, save it to either an array of pixels, channel diff, etc...
 	for(int i = 0; i<bytesread; i++) {
         // verify if rgb or rgba (from the header info) and if its 1 or the other, store the pixels
         if(pixel_arr_bytes[i] == rgb_header_m) {
@@ -261,21 +263,32 @@ void qoi_decoder(FILE *src_ptr, FILE *dest_ptr, qoi_header_t **pQoi) {
             RGBA.rgba.b = pixel_arr_bytes[i++];
 
         } else if(pixel_arr_bytes[i] == rgba_header_m) {
-            // todo - store rgba values inside the arr_bytes array
-            printf("store rgba, increment and move in the array 4 bytes (RGBA)");
-        }
+            i++;
+            RGBA.rgba.r = pixel_arr_bytes[i++];
+            RGBA.rgba.g = pixel_arr_bytes[i++];
+            RGBA.rgba.b = pixel_arr_bytes[i++];
+            RGBA.rgba.a = pixel_arr_bytes[i++];
 
-		if((pixel_arr_bytes[i] & two_header_m) == index_header_m) {
-            // todo - if current byte matches mask 11000000 and is equal to the index mask, do index stuff
-            printf("do index stuff");
+        } else if((pixel_arr_bytes[i] & two_header_m) == index_header_m) {
+            // If current byte matches mask 11000000 and is equal to the index mask, add byte to index array.
+            RGBA = index[pixel_arr_bytes[i]];
+
         } else if ((pixel_arr_bytes[i] & two_header_m) == diff_header_m) {
             // todo - if current byte matches mask 11000000 and is equal to the diff mask, do index stuff
             printf("do diff stuff");
-        } else if ((pixel_arr_bytes[i] & two_header_m) == run_header_m) {
-            // todo - if current byte matches mask 11000000 and is equal to the op_run mask, do index stuff
-            printf("do op_run stuff");
-        }
 
+        //todo also need to do luma mask check on its own else if.
+        } else if ((pixel_arr_bytes[i] & two_header_m) == run_header_m) {
+            // If current byte matches mask 11000000 and is equal to the op_run mask, get 00111111 bit and store it in run_length
+            run_length = (pixel_arr_bytes[i]&run_length_m);
+        }
+        index[QOI_COLOR_HASH(RGBA) % 64] = RGBA;
+
+        // todo check what/how exactly im gonna store the pixel array into the destination file. (probably similar to bmp decoder)
+        /* probably going to make a BYTE *pixels_arr and store all pixels in order into it.
+        */
+
+        // continue here...
 	}
 
 	if(pixel_arr_bytes) { // todo swap this for the arr_bytes array, or the array with the pixel data whenever i get it
@@ -290,7 +303,8 @@ void qoi_decoder(FILE *src_ptr, FILE *dest_ptr, qoi_header_t **pQoi) {
 }
 
 int qoi_encoder(FILE *src_ptr, qoi_header_t *pQoi) {
-	// Encoder stuff goes here.
+	// todo make the qoi encoder - it receives raw pixel file.
+    //  Encoder stuff goes here.
 	return 0;
 }
 
