@@ -235,10 +235,11 @@ void qoi_decoder(FILE *src_ptr, FILE *dest_ptr, qoi_header_t **pQoi) {
 	int rgb_header_m = 0b11111110;
     int rgba_header_m = 0b11111111;
 	int two_header_m = 0b11000000;
-    int index_header_m = 0b01000000;
-    int diff_header_m = 0b10000000;
-    int run_header_m = 0b11000000;
-    int run_length_m = 0b00111111;
+    int four_header_m = 0b00001111;
+    int six_length_m = 0b00111111;
+    int index_header_m = 0b00000000;
+    int diff_header_m = 0b01000000;
+    int luma_header_m = 0b10000000;
     qoi_rgba_t index[64];
 
     // Header doesn't provide info on where the pixel array starts
@@ -248,13 +249,18 @@ void qoi_decoder(FILE *src_ptr, FILE *dest_ptr, qoi_header_t **pQoi) {
     }
 
 	fseek(src_ptr, 0, SEEK_SET);
-    int qoi_size = (*pQoi)->width * (*pQoi)->height * (*pQoi)->channels; //todo swap end_byte with this value to read the entire file
+    int qoi_size = (*pQoi)->width * (*pQoi)->height * (*pQoi)->channels; //this value is the size of the whole pixel array
 
-	BYTE *pixel_arr_bytes = read_bytes(src_ptr, 14, 50000, &bytesread); //todo change so it goes till end byte of file.
+	BYTE *pixel_arr_bytes = read_bytes(src_ptr, 14, 50000, &bytesread); //todo change for qoi_size so it goes till end byte of file.
     qoi_rgba_t RGBA;
-    BYTE *final_arr_bytes;
+    RGBA.rgba.r = 0;
+    RGBA.rgba.g = 0;
+    RGBA.rgba.b = 0;
+    RGBA.rgba.a = 255;
 
-	for(int i = 0; i<bytesread; i++) {
+    BYTE *final_arr_bytes[bytesread];
+
+	for(int i = 0, k = 0; i<bytesread; i++) {
         // verify if rgb or rgba (from the header info) and if its 1 or the other, store the pixels
         if(pixel_arr_bytes[i] == rgb_header_m) {
             i++;
@@ -274,24 +280,30 @@ void qoi_decoder(FILE *src_ptr, FILE *dest_ptr, qoi_header_t **pQoi) {
             RGBA = index[pixel_arr_bytes[i]];
 
         } else if ((pixel_arr_bytes[i] & two_header_m) == diff_header_m) {
-            // todo - if current byte matches mask 11000000 and is equal to the diff mask, do index stuff
-            printf("do diff stuff");
-
-        //todo also need to do luma mask check on its own else if.
-        } else if ((pixel_arr_bytes[i] & two_header_m) == run_header_m) {
+            // If current byte matches mask 11000000 and is equal to the diff mask, modify rgb values as needed
+            // there's a bias of 2, thus -2
+            RGBA.rgba.r += ((pixel_arr_bytes[i]>>4) & 0x03) - 2; // 0x03 = 0b00000011
+            RGBA.rgba.g += ((pixel_arr_bytes[i]>>2) & 0x03) - 2;
+            RGBA.rgba.b += (pixel_arr_bytes[i] & 0x03) - 2;
+        } else if((pixel_arr_bytes[i] & two_header_m) == luma_header_m) {
+            // qoi_op_luma is 2 bytes long, 1st byte is 2bit header + 6bit diff green, 2nd byte is 4bit dr-dg and 4bit db-dg
+            // There's a bias of 32, for the green channel and 8 for the other 2
+            int byte_curr=pixel_arr_bytes[i];
+            int byte_next=pixel_arr_bytes[i++];
+            int gc = (byte_curr&six_length_m)-32;
+            RGBA.rgba.r += gc - 8 + ((byte_next>>4) & four_header_m);
+            RGBA.rgba.g += gc;
+            RGBA.rgba.b += gc - 8 + (byte_next & four_header_m);
+        } else if ((pixel_arr_bytes[i] & two_header_m) == two_header_m) {
             // If current byte matches mask 11000000 and is equal to the op_run mask, get 00111111 bit and store it in run_length
-            run_length = (pixel_arr_bytes[i]&run_length_m);
+            run_length = (pixel_arr_bytes[i]&six_length_m);
         }
         index[QOI_COLOR_HASH(RGBA) % 64] = RGBA;
 
-        // todo check what/how exactly im gonna store the pixel array into the destination file. (probably similar to bmp decoder)
-        /* probably going to make a BYTE *pixels_arr and store all pixels in order into it.
-        */
-
-        // continue here...
+        // todo Write rbga array into final_arr_bytes
 	}
-
-	if(pixel_arr_bytes) { // todo swap this for the arr_bytes array, or the array with the pixel data whenever i get it
+    // todo swap this for the arr_bytes array, or the array with the pixel data whenever i get it
+	if(pixel_arr_bytes) {
 		int count = 1;
 		int n_obj = fwrite(pixel_arr_bytes, 50000, count, dest_ptr); //change so it goes till end byte of file.
 		if(n_obj != count) {
@@ -333,12 +345,10 @@ int main(int argc, char **argv) {
 	qoi_decoder(ptr_qoi, ptr_rawpixeldata, &pQoi);
 	//qoi_encoder(ptr_rawpixeldata, pQoi);
 
-	/* TODO
-	 * Create an all purpose function that verifies what file is being given and either converts it to qoi or bmp.
-	 * Create a function bmp->qoi converter that receives a bmp file and converts it to a qoi file.
-	 * Create a function qoi->bmp converter that receives a qoi file and converts it to a bmp file.
-	 * Separate code into different files, and create a seperate .h file to declare functions
-	*/
+	// TODO Create an all purpose function that verifies what file is being given and either converts it to qoi or bmp.
+    // TODO Create a function bmp->qoi converter that receives a bmp file and converts it to a qoi file.
+    // TODO Create a function qoi->bmp converter that receives a qoi file and converts it to a bmp file.
+    // TODO Separate code into different files, and create a seperate .h file to declare functions
 
 	// Closing files.
 	fclose(ptr_rawpixeldata);
