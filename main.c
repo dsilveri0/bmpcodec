@@ -1,6 +1,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define FILEBMP "insanecat.bmp"
 #define FILEQOI "insanecat.qoi"
@@ -228,14 +229,25 @@ int bmp_encoder(FILE *src_ptr, bmp_header_t *pBmp) {
 	return 0;
 }
 
+void append_color(BYTE **src_arr, size_t *size, unsigned int color) {
+    *src_arr = realloc(*src_arr, *size + 4);
+    if (*src_arr == NULL) {
+        perror("Error reallocating memory");
+        return;
+    }
 
+    memcpy(*src_arr + *size, &color, 4);
+    *size += 4;
+}
+
+// todo im generating a pixel array larger than the origin file, verify whats going on
 void qoi_decoder(FILE *src_ptr, FILE *dest_ptr, qoi_header_t **pQoi) {
 	int bytesread = 0;
     int run_length = 0;
 	int rgb_header_m = 0b11111110;
     int rgba_header_m = 0b11111111;
 	int two_header_m = 0b11000000;
-    int four_header_m = 0b00001111;
+    int four_length_m = 0b00001111;
     int six_length_m = 0b00111111;
     int index_header_m = 0b00000000;
     int diff_header_m = 0b01000000;
@@ -249,18 +261,24 @@ void qoi_decoder(FILE *src_ptr, FILE *dest_ptr, qoi_header_t **pQoi) {
     }
 
 	fseek(src_ptr, 0, SEEK_SET);
-    int qoi_size = (*pQoi)->width * (*pQoi)->height * (*pQoi)->channels; //this value is the size of the whole pixel array
 
-	BYTE *pixel_arr_bytes = read_bytes(src_ptr, 14, 50000, &bytesread); //todo change for qoi_size so it goes till end byte of file.
+    unsigned int height = ((((*pQoi)->height>>16)&0xFF) << 8) | ((*pQoi)->height>>24)&0xFF;
+    unsigned int width = ((((*pQoi)->width>>16)&0xFF) << 8) | ((*pQoi)->width>>24)&0xFF;
+
+    int qoi_size = height * width * (*pQoi)->channels; //this value is the size of the whole pixel array
+
+	BYTE *pixel_arr_bytes = read_bytes(src_ptr, 14, qoi_size, &bytesread);
     qoi_rgba_t RGBA;
     RGBA.rgba.r = 0;
     RGBA.rgba.g = 0;
     RGBA.rgba.b = 0;
     RGBA.rgba.a = 255;
+    RGBA.v = 0;
 
-    BYTE *final_arr_bytes[bytesread];
+    BYTE *final_arr_bytes = NULL;
+    size_t final_arr_size = 0;
 
-	for(int i = 0, k = 0; i<bytesread; i++) {
+	for(int i = 0; i<bytesread; i++) {
         // verify if rgb or rgba (from the header info) and if its 1 or the other, store the pixels
         if(pixel_arr_bytes[i] == rgb_header_m) {
             i++;
@@ -285,33 +303,36 @@ void qoi_decoder(FILE *src_ptr, FILE *dest_ptr, qoi_header_t **pQoi) {
             RGBA.rgba.r += ((pixel_arr_bytes[i]>>4) & 0x03) - 2; // 0x03 = 0b00000011
             RGBA.rgba.g += ((pixel_arr_bytes[i]>>2) & 0x03) - 2;
             RGBA.rgba.b += (pixel_arr_bytes[i] & 0x03) - 2;
+
         } else if((pixel_arr_bytes[i] & two_header_m) == luma_header_m) {
             // qoi_op_luma is 2 bytes long, 1st byte is 2bit header + 6bit diff green, 2nd byte is 4bit dr-dg and 4bit db-dg
             // There's a bias of 32, for the green channel and 8 for the other 2
             int byte_curr=pixel_arr_bytes[i];
             int byte_next=pixel_arr_bytes[i++];
             int gc = (byte_curr&six_length_m)-32;
-            RGBA.rgba.r += gc - 8 + ((byte_next>>4) & four_header_m);
+            RGBA.rgba.r += gc - 8 + ((byte_next>>4) & four_length_m);
             RGBA.rgba.g += gc;
-            RGBA.rgba.b += gc - 8 + (byte_next & four_header_m);
+            RGBA.rgba.b += gc - 8 + (byte_next & four_length_m);
+
         } else if ((pixel_arr_bytes[i] & two_header_m) == two_header_m) {
             // If current byte matches mask 11000000 and is equal to the op_run mask, get 00111111 bit and store it in run_length
             run_length = (pixel_arr_bytes[i]&six_length_m);
+
         }
         index[QOI_COLOR_HASH(RGBA) % 64] = RGBA;
 
-        // todo Write rbga array into final_arr_bytes
+        // Write rbga array into the final array.
+        append_color(&final_arr_bytes, &final_arr_size, RGBA.v);
 	}
-    // todo swap this for the arr_bytes array, or the array with the pixel data whenever i get it
-	if(pixel_arr_bytes) {
+    // Write the pixel array to the destination file.
+	if(final_arr_bytes) {
 		int count = 1;
-		int n_obj = fwrite(pixel_arr_bytes, 50000, count, dest_ptr); //change so it goes till end byte of file.
+		int n_obj = fwrite(final_arr_bytes, final_arr_size, count, dest_ptr); //change so it goes till end byte of file.
 		if(n_obj != count) {
 			//error occurred writing to file
 			perror("Error occurred decoding file");
 		}
 	}
-
 }
 
 int qoi_encoder(FILE *src_ptr, qoi_header_t *pQoi) {
@@ -338,7 +359,7 @@ int main(int argc, char **argv) {
 		return 1;
 
 	// Encoding/Decoding operations for the bmp format
-	//bmp_decoder(ptr_bmp, ptr_rawpixeldata, &pBmp);
+    //bmp_decoder(ptr_bmp, ptr_rawpixeldata, &pBmp);
 	//bmp_encoder(ptr_rawpixeldata, pBmp);
 
 	// Encoding/Decoding operations for the qoi format
