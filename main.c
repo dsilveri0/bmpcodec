@@ -138,6 +138,19 @@ BYTE *read_bytes(FILE *ptr, int start_byte, int end_byte, int *readbytes) {
 	return bytes;
 }
 
+/* Function receives an array, a size and a color pixel and adds it to the array.
+ * */
+void append_color(BYTE **src_arr, size_t *size, unsigned int color) {
+    *src_arr = realloc(*src_arr, *size + 4);
+    if (*src_arr == NULL) {
+        perror("Error reallocating memory");
+        return;
+    }
+
+    memcpy(*src_arr + *size, &color, 4);
+    *size += 4;
+}
+
 /* bmp decoder function grabs a .bmp file, and decodes it, by storing the bmp and dib
  * headers in a structure, and saving the pixel array into a separate file.
  * */
@@ -229,18 +242,6 @@ int bmp_encoder(FILE *src_ptr, bmp_header_t *pBmp) {
 	return 0;
 }
 
-void append_color(BYTE **src_arr, size_t *size, unsigned int color) {
-    *src_arr = realloc(*src_arr, *size + 4);
-    if (*src_arr == NULL) {
-        perror("Error reallocating memory");
-        return;
-    }
-
-    memcpy(*src_arr + *size, &color, 4);
-    *size += 4;
-}
-
-// todo im generating a pixel array larger than the origin file, verify whats going on
 void qoi_decoder(FILE *src_ptr, FILE *dest_ptr, qoi_header_t **pQoi) {
 	int bytesread = 0;
     int run_length = 0;
@@ -262,10 +263,10 @@ void qoi_decoder(FILE *src_ptr, FILE *dest_ptr, qoi_header_t **pQoi) {
 
 	fseek(src_ptr, 0, SEEK_SET);
 
-    unsigned int height = ((((*pQoi)->height>>16)&0xFF) << 8) | ((*pQoi)->height>>24)&0xFF;
-    unsigned int width = ((((*pQoi)->width>>16)&0xFF) << 8) | ((*pQoi)->width>>24)&0xFF;
+    (*pQoi)->height = ((((*pQoi)->height>>16)&0xFF) << 8) | ((*pQoi)->height>>24)&0xFF;
+    (*pQoi)->width = ((((*pQoi)->width>>16)&0xFF) << 8) | ((*pQoi)->width>>24)&0xFF;
 
-    int qoi_size = height * width * (*pQoi)->channels; //this value is the size of the whole pixel array
+    int qoi_size = (*pQoi)->height * (*pQoi)->width;
 
 	BYTE *pixel_arr_bytes = read_bytes(src_ptr, 14, qoi_size, &bytesread);
     qoi_rgba_t RGBA;
@@ -363,12 +364,33 @@ int main(int argc, char **argv) {
 	//bmp_encoder(ptr_rawpixeldata, pBmp);
 
 	// Encoding/Decoding operations for the qoi format
-	qoi_decoder(ptr_qoi, ptr_rawpixeldata, &pQoi);
+	//qoi_decoder(ptr_qoi, ptr_rawpixeldata, &pQoi); // 24bpp for rgb and 32bpp for rgba
 	//qoi_encoder(ptr_rawpixeldata, pQoi);
 
-	// TODO Create an all purpose function that verifies what file is being given and either converts it to qoi or bmp.
     // TODO Create a function bmp->qoi converter that receives a bmp file and converts it to a qoi file.
     // TODO Create a function qoi->bmp converter that receives a qoi file and converts it to a bmp file.
+    /* Test run converting between file formats here */
+
+    qoi_decoder(ptr_qoi, ptr_rawpixeldata, &pQoi); // 24bpp for rgb and 32bpp for rgba
+
+    // writing some header data into the pBmp var, before starting encoding the pixel data into the file.
+    pBmp->id = 0x4d42;
+    pBmp->bmp_size = pQoi->height * pQoi->width * pQoi->channels;
+    pBmp->pixel_array_off = 138;
+    pBmp->dib_header_bytes = 138-14;
+    pBmp->width = pQoi->width;
+    pBmp->height = pQoi->height;
+    if(pQoi->channels == 3) {
+        pBmp->bpp = 24;
+    } else if(pQoi->channels == 4) {
+        pBmp->bpp = 32;
+    }
+    pBmp->colorplanes = 1;
+    bmp_encoder(ptr_rawpixeldata, pBmp);
+
+    /* ---------------------------------------------------- */
+
+	// TODO Create an all purpose function that verifies what file is being given and either converts it to qoi or bmp.
     // TODO Separate code into different files, and create a seperate .h file to declare functions
 
 	// Closing files.
