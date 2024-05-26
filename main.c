@@ -69,6 +69,8 @@ typedef union {
     unsigned int v;
 } qoi_rgba_t;
 
+static const unsigned char qoi_padding[8] = {0,0,0,0,0,0,0,1};
+
 int calc_rowsize(int bpp, int image_width) {
 	// calculating row size based on docs formula
 	int row_size = (bpp*image_width)/8;
@@ -242,9 +244,10 @@ int bmp_encoder(FILE *src_ptr, bmp_header_t *pBmp) {
 	return 0;
 }
 
+// todo when i decode the qoi file im not getting the same amount of bytes as the original file. check whats up
 void qoi_decoder(FILE *src_ptr, FILE *dest_ptr, qoi_header_t **pQoi) {
 	int bytesread = 0;
-    int run_length = 0;
+    int run_length = 0, chunks = 0;
 	int rgb_header_m = 0b11111110;
     int rgba_header_m = 0b11111111;
 	int two_header_m = 0b11000000;
@@ -278,49 +281,54 @@ void qoi_decoder(FILE *src_ptr, FILE *dest_ptr, qoi_header_t **pQoi) {
 
     BYTE *final_arr_bytes = NULL;
     size_t final_arr_size = 0;
+    chunks = bytesread - (int)sizeof(qoi_padding);
 
 	for(int i = 0; i<bytesread; i++) {
-        // verify if rgb or rgba (from the header info) and if its 1 or the other, store the pixels
-        if(pixel_arr_bytes[i] == rgb_header_m) {
-            i++;
-            RGBA.rgba.r = pixel_arr_bytes[i++];
-            RGBA.rgba.g = pixel_arr_bytes[i++];
-            RGBA.rgba.b = pixel_arr_bytes[i++];
+        if (run_length > 0) {
+            run_length--;
+        } else if (i < chunks) {
+            // verify if rgb or rgba (from the header info) and if its 1 or the other, store the pixels
+            if (pixel_arr_bytes[i] == rgb_header_m) {
+                i++;
+                RGBA.rgba.r = pixel_arr_bytes[i++];
+                RGBA.rgba.g = pixel_arr_bytes[i++];
+                RGBA.rgba.b = pixel_arr_bytes[i++];
 
-        } else if(pixel_arr_bytes[i] == rgba_header_m) {
-            i++;
-            RGBA.rgba.r = pixel_arr_bytes[i++];
-            RGBA.rgba.g = pixel_arr_bytes[i++];
-            RGBA.rgba.b = pixel_arr_bytes[i++];
-            RGBA.rgba.a = pixel_arr_bytes[i++];
+            } else if (pixel_arr_bytes[i] == rgba_header_m) {
+                i++;
+                RGBA.rgba.r = pixel_arr_bytes[i++];
+                RGBA.rgba.g = pixel_arr_bytes[i++];
+                RGBA.rgba.b = pixel_arr_bytes[i++];
+                RGBA.rgba.a = pixel_arr_bytes[i++];
 
-        } else if((pixel_arr_bytes[i] & two_header_m) == index_header_m) {
-            // If current byte matches mask 11000000 and is equal to the index mask, add byte to index array.
-            RGBA = index[pixel_arr_bytes[i]];
+            } else if ((pixel_arr_bytes[i] & two_header_m) == index_header_m) {
+                // If current byte matches mask 11000000 and is equal to the index mask, add byte to index array.
+                RGBA = index[pixel_arr_bytes[i]];
 
-        } else if ((pixel_arr_bytes[i] & two_header_m) == diff_header_m) {
-            // If current byte matches mask 11000000 and is equal to the diff mask, modify rgb values as needed
-            // there's a bias of 2, thus -2
-            RGBA.rgba.r += ((pixel_arr_bytes[i]>>4) & 0x03) - 2; // 0x03 = 0b00000011
-            RGBA.rgba.g += ((pixel_arr_bytes[i]>>2) & 0x03) - 2;
-            RGBA.rgba.b += (pixel_arr_bytes[i] & 0x03) - 2;
+            } else if ((pixel_arr_bytes[i] & two_header_m) == diff_header_m) {
+                // If current byte matches mask 11000000 and is equal to the diff mask, modify rgb values as needed
+                // there's a bias of 2, thus -2
+                RGBA.rgba.r += ((pixel_arr_bytes[i] >> 4) & 0x03) - 2; // 0x03 = 0b00000011
+                RGBA.rgba.g += ((pixel_arr_bytes[i] >> 2) & 0x03) - 2;
+                RGBA.rgba.b += (pixel_arr_bytes[i] & 0x03) - 2;
 
-        } else if((pixel_arr_bytes[i] & two_header_m) == luma_header_m) {
-            // qoi_op_luma is 2 bytes long, 1st byte is 2bit header + 6bit diff green, 2nd byte is 4bit dr-dg and 4bit db-dg
-            // There's a bias of 32, for the green channel and 8 for the other 2
-            int byte_curr=pixel_arr_bytes[i];
-            int byte_next=pixel_arr_bytes[i++];
-            int gc = (byte_curr&six_length_m)-32;
-            RGBA.rgba.r += gc - 8 + ((byte_next>>4) & four_length_m);
-            RGBA.rgba.g += gc;
-            RGBA.rgba.b += gc - 8 + (byte_next & four_length_m);
+            } else if ((pixel_arr_bytes[i] & two_header_m) == luma_header_m) {
+                // qoi_op_luma is 2 bytes long, 1st byte is 2bit header + 6bit diff green, 2nd byte is 4bit dr-dg and 4bit db-dg
+                // There's a bias of 32, for the green channel and 8 for the other 2
+                int byte_curr = pixel_arr_bytes[i];
+                int byte_next = pixel_arr_bytes[i++];
+                int gc = (byte_curr & six_length_m) - 32;
+                RGBA.rgba.r += gc - 8 + ((byte_next >> 4) & four_length_m);
+                RGBA.rgba.g += gc;
+                RGBA.rgba.b += gc - 8 + (byte_next & four_length_m);
 
-        } else if ((pixel_arr_bytes[i] & two_header_m) == two_header_m) {
-            // If current byte matches mask 11000000 and is equal to the op_run mask, get 00111111 bit and store it in run_length
-            run_length = (pixel_arr_bytes[i]&six_length_m);
+            } else if ((pixel_arr_bytes[i] & two_header_m) == two_header_m) {
+                // If current byte matches mask 11000000 and is equal to the op_run mask, get 00111111 bit and store it in run_length
+                run_length = (pixel_arr_bytes[i] & six_length_m);
 
+            }
+            index[QOI_COLOR_HASH(RGBA) % 64] = RGBA;
         }
-        index[QOI_COLOR_HASH(RGBA) % 64] = RGBA;
 
         // Write rbga array into the final array.
         append_color(&final_arr_bytes, &final_arr_size, RGBA.v);
@@ -337,9 +345,27 @@ void qoi_decoder(FILE *src_ptr, FILE *dest_ptr, qoi_header_t **pQoi) {
 }
 
 int qoi_encoder(FILE *src_ptr, qoi_header_t *pQoi) {
-	// todo make the qoi encoder - it receives raw pixel file.
     //  Encoder stuff goes here.
 	return 0;
+}
+
+void qoi_bmp_conv(FILE *ptr_qoi, FILE *pixel_arr_ptr, bmp_header_t *pBmp, qoi_header_t *pQoi) {
+    qoi_decoder(ptr_qoi, pixel_arr_ptr, &pQoi); // 24bpp for rgb and 32bpp for rgba
+
+    // writing some header data into the pBmp var, before starting encoding the pixel data into the file.
+    pBmp->id = 0x4d42;
+    pBmp->bmp_size = pQoi->height * pQoi->width * pQoi->channels;
+    pBmp->pixel_array_off = 138;
+    pBmp->dib_header_bytes = 138-14;
+    pBmp->width = pQoi->width;
+    pBmp->height = pQoi->height;
+    if(pQoi->channels == 3) {
+        pBmp->bpp = 24;
+    } else if(pQoi->channels == 4) {
+        pBmp->bpp = 32;
+    }
+    pBmp->colorplanes = 1;
+    bmp_encoder(pixel_arr_ptr, pBmp);
 }
 
 
@@ -368,27 +394,10 @@ int main(int argc, char **argv) {
 	//qoi_encoder(ptr_rawpixeldata, pQoi);
 
     // TODO Create a function bmp->qoi converter that receives a bmp file and converts it to a qoi file.
-    // TODO Create a function qoi->bmp converter that receives a qoi file and converts it to a bmp file.
-    /* Test run converting between file formats here */
+    // Function that converts from BMP to Qoi
 
-    qoi_decoder(ptr_qoi, ptr_rawpixeldata, &pQoi); // 24bpp for rgb and 32bpp for rgba
-
-    // writing some header data into the pBmp var, before starting encoding the pixel data into the file.
-    pBmp->id = 0x4d42;
-    pBmp->bmp_size = pQoi->height * pQoi->width * pQoi->channels;
-    pBmp->pixel_array_off = 138;
-    pBmp->dib_header_bytes = 138-14;
-    pBmp->width = pQoi->width;
-    pBmp->height = pQoi->height;
-    if(pQoi->channels == 3) {
-        pBmp->bpp = 24;
-    } else if(pQoi->channels == 4) {
-        pBmp->bpp = 32;
-    }
-    pBmp->colorplanes = 1;
-    bmp_encoder(ptr_rawpixeldata, pBmp);
-
-    /* ---------------------------------------------------- */
+    // Function that converts from Qoi to BMP
+    qoi_bmp_conv(ptr_qoi, ptr_rawpixeldata, pBmp, pQoi);
 
 	// TODO Create an all purpose function that verifies what file is being given and either converts it to qoi or bmp.
     // TODO Separate code into different files, and create a seperate .h file to declare functions
