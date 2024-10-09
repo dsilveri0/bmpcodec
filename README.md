@@ -1,3 +1,3 @@
-# image converter
+# BMP Codec
 
-image conversion from bmp to qoi and from qoi to bmp.
+BMP codec that does decoding and encoding of BMP files.

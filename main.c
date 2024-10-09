@@ -4,11 +4,8 @@
 #include <string.h>
 
 #define FILEBMP "insanecat.bmp"
-#define FILEQOI "insanecat.qoi"
 #define RAWPIXELDATA "rawpixeldata"
 #define BMPENCODED "bmpencoded.bmp"
-#define QOIENCODED "qoi.bmp"
-#define QOI_COLOR_HASH(C) (C.rgba.r*3 + C.rgba.g*5 + C.rgba.b*7 + C.rgba.a*11)
 
 typedef unsigned char BYTE;
 
@@ -52,24 +49,6 @@ typedef struct {
 	int v5_profile_size;
 	int v5_reserved;
 } bmp_header, bmp_header_t;
-
-
-#pragma pack(1)
-typedef struct {
-	int id;
-	int width;
-	int height;
-	char channels;
-	char colour_space;
-} qoi_header, qoi_header_t;
-
-// Struct to store RGBA pixel data.
-typedef union {
-    struct { BYTE r, g, b, a;} rgba;
-    unsigned int v;
-} qoi_rgba_t;
-
-static const unsigned char qoi_padding[8] = {0,0,0,0,0,0,0,1};
 
 int calc_rowsize(int bpp, int image_width) {
 	// calculating row size based on docs formula
@@ -138,19 +117,6 @@ BYTE *read_bytes(FILE *ptr, int start_byte, int end_byte, int *readbytes) {
 		perror("Couldn't read all requested bytes");
 
 	return bytes;
-}
-
-/* Function receives an array, a size and a color pixel and adds it to the array.
- * */
-void append_color(BYTE **src_arr, size_t *size, unsigned int color) {
-    *src_arr = realloc(*src_arr, *size + 4);
-    if (*src_arr == NULL) {
-        perror("Error reallocating memory");
-        return;
-    }
-
-    memcpy(*src_arr + *size, &color, 4);
-    *size += 4;
 }
 
 /* bmp decoder function grabs a .bmp file, and decodes it, by storing the bmp and dib
@@ -244,172 +210,29 @@ int bmp_encoder(FILE *src_ptr, bmp_header_t *pBmp) {
 	return 0;
 }
 
-// todo when i decode the qoi file im not getting the same amount of bytes as the original file. check whats up
-void qoi_decoder(FILE *src_ptr, FILE *dest_ptr, qoi_header_t **pQoi) {
-	int bytesread = 0;
-    int run_length = 0, chunks = 0;
-	int rgb_header_m = 0b11111110;
-    int rgba_header_m = 0b11111111;
-	int two_header_m = 0b11000000;
-    int four_length_m = 0b00001111;
-    int six_length_m = 0b00111111;
-    int index_header_m = 0b00000000;
-    int diff_header_m = 0b01000000;
-    int luma_header_m = 0b10000000;
-    qoi_rgba_t index[64];
-
-    // Header doesn't provide info on where the pixel array starts
-	BYTE *header = read_bytes(src_ptr, 0, 14, &bytesread);
-	if(header) {
-        *pQoi = (qoi_header_t*)header;
-    }
-
-	fseek(src_ptr, 0, SEEK_SET);
-
-    (*pQoi)->height = ((((*pQoi)->height>>16)&0xFF) << 8) | ((*pQoi)->height>>24)&0xFF;
-    (*pQoi)->width = ((((*pQoi)->width>>16)&0xFF) << 8) | ((*pQoi)->width>>24)&0xFF;
-
-    int qoi_size = (*pQoi)->height * (*pQoi)->width;
-
-	BYTE *pixel_arr_bytes = read_bytes(src_ptr, 14, qoi_size, &bytesread);
-    qoi_rgba_t RGBA;
-    RGBA.rgba.r = 0;
-    RGBA.rgba.g = 0;
-    RGBA.rgba.b = 0;
-    RGBA.rgba.a = 255;
-    RGBA.v = 0;
-
-    BYTE *final_arr_bytes = NULL;
-    size_t final_arr_size = 0;
-    chunks = bytesread - (int)sizeof(qoi_padding);
-
-	for(int i = 0; i<bytesread; i++) {
-        if (run_length > 0) {
-            run_length--;
-        } else if (i < chunks) {
-            // verify if rgb or rgba (from the header info) and if its 1 or the other, store the pixels
-            if (pixel_arr_bytes[i] == rgb_header_m) {
-                i++;
-                RGBA.rgba.r = pixel_arr_bytes[i++];
-                RGBA.rgba.g = pixel_arr_bytes[i++];
-                RGBA.rgba.b = pixel_arr_bytes[i++];
-
-            } else if (pixel_arr_bytes[i] == rgba_header_m) {
-                i++;
-                RGBA.rgba.r = pixel_arr_bytes[i++];
-                RGBA.rgba.g = pixel_arr_bytes[i++];
-                RGBA.rgba.b = pixel_arr_bytes[i++];
-                RGBA.rgba.a = pixel_arr_bytes[i++];
-
-            } else if ((pixel_arr_bytes[i] & two_header_m) == index_header_m) {
-                // If current byte matches mask 11000000 and is equal to the index mask, add byte to index array.
-                RGBA = index[pixel_arr_bytes[i]];
-
-            } else if ((pixel_arr_bytes[i] & two_header_m) == diff_header_m) {
-                // If current byte matches mask 11000000 and is equal to the diff mask, modify rgb values as needed
-                // there's a bias of 2, thus -2
-                RGBA.rgba.r += ((pixel_arr_bytes[i] >> 4) & 0x03) - 2; // 0x03 = 0b00000011
-                RGBA.rgba.g += ((pixel_arr_bytes[i] >> 2) & 0x03) - 2;
-                RGBA.rgba.b += (pixel_arr_bytes[i] & 0x03) - 2;
-
-            } else if ((pixel_arr_bytes[i] & two_header_m) == luma_header_m) {
-                // qoi_op_luma is 2 bytes long, 1st byte is 2bit header + 6bit diff green, 2nd byte is 4bit dr-dg and 4bit db-dg
-                // There's a bias of 32, for the green channel and 8 for the other 2
-                int byte_curr = pixel_arr_bytes[i];
-                int byte_next = pixel_arr_bytes[i++];
-                int gc = (byte_curr & six_length_m) - 32;
-                RGBA.rgba.r += gc - 8 + ((byte_next >> 4) & four_length_m);
-                RGBA.rgba.g += gc;
-                RGBA.rgba.b += gc - 8 + (byte_next & four_length_m);
-
-            } else if ((pixel_arr_bytes[i] & two_header_m) == two_header_m) {
-                // If current byte matches mask 11000000 and is equal to the op_run mask, get 00111111 bit and store it in run_length
-                run_length = (pixel_arr_bytes[i] & six_length_m);
-
-            }
-            index[QOI_COLOR_HASH(RGBA) % 64] = RGBA;
-        }
-
-        // Write rbga array into the final array.
-        append_color(&final_arr_bytes, &final_arr_size, RGBA.v);
-	}
-    // Write the pixel array to the destination file.
-	if(final_arr_bytes) {
-		int count = 1;
-		int n_obj = fwrite(final_arr_bytes, final_arr_size, count, dest_ptr); //change so it goes till end byte of file.
-		if(n_obj != count) {
-			//error occurred writing to file
-			perror("Error occurred decoding file");
-		}
-	}
-}
-
-int qoi_encoder(FILE *src_ptr, qoi_header_t *pQoi) {
-    //  Encoder stuff goes here.
-	return 0;
-}
-
-void qoi_bmp_conv(FILE *ptr_qoi, FILE *pixel_arr_ptr, bmp_header_t *pBmp, qoi_header_t *pQoi) {
-    qoi_decoder(ptr_qoi, pixel_arr_ptr, &pQoi); // 24bpp for rgb and 32bpp for rgba
-
-    // writing some header data into the pBmp var, before starting encoding the pixel data into the file.
-    pBmp->id = 0x4d42;
-    pBmp->bmp_size = pQoi->height * pQoi->width * pQoi->channels;
-    pBmp->pixel_array_off = 138;
-    pBmp->dib_header_bytes = 138-14;
-    pBmp->width = pQoi->width;
-    pBmp->height = pQoi->height;
-    if(pQoi->channels == 3) {
-        pBmp->bpp = 24;
-    } else if(pQoi->channels == 4) {
-        pBmp->bpp = 32;
-    }
-    pBmp->colorplanes = 1;
-    bmp_encoder(pixel_arr_ptr, pBmp);
-}
-
-
 int main(int argc, char **argv) {
 
 	FILE* ptr_bmp;
-	FILE* ptr_qoi;
 	FILE* ptr_rawpixeldata;
 
 	bmp_header_t* pBmp;
-	qoi_header_t* pQoi;
 
 	// Opening files
 	ptr_bmp = fopen(FILEBMP, "rb");
-	ptr_qoi = fopen(FILEQOI, "rb");
 	ptr_rawpixeldata = fopen(RAWPIXELDATA, "wb+");
-	if(NULL == ptr_bmp || NULL == ptr_rawpixeldata || NULL == ptr_qoi)
+	if(NULL == ptr_bmp || NULL == ptr_rawpixeldata)
 		return 1;
 
 	// Encoding/Decoding operations for the bmp format
-    //bmp_decoder(ptr_bmp, ptr_rawpixeldata, &pBmp);
-	//bmp_encoder(ptr_rawpixeldata, pBmp);
-
-	// Encoding/Decoding operations for the qoi format
-	//qoi_decoder(ptr_qoi, ptr_rawpixeldata, &pQoi); // 24bpp for rgb and 32bpp for rgba
-	//qoi_encoder(ptr_rawpixeldata, pQoi);
-
-    // TODO Create a function bmp->qoi converter that receives a bmp file and converts it to a qoi file.
-    // Function that converts from BMP to Qoi
-
-    // Function that converts from Qoi to BMP
-    qoi_bmp_conv(ptr_qoi, ptr_rawpixeldata, pBmp, pQoi);
-
-	// TODO Create an all purpose function that verifies what file is being given and either converts it to qoi or bmp.
-    // TODO Separate code into different files, and create a seperate .h file to declare functions
+    bmp_decoder(ptr_bmp, ptr_rawpixeldata, &pBmp);
+	bmp_encoder(ptr_rawpixeldata, pBmp);
 
 	// Closing files.
 	fclose(ptr_rawpixeldata);
-	fclose(ptr_qoi);
 	fclose(ptr_bmp);
 
 	// Free memory allocation
-	//free(pBmp);
-	free(pQoi);
+	free(pBmp);
 
 	return 0;
 }
