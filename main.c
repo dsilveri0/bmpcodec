@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define FILEBMP "insanecat.bmp"
+#define FILEBMP "../resources/insanecat.bmp"
 #define RAWPIXELDATA "rawpixeldata"
 #define BMPENCODED "bmpencoded.bmp"
 
@@ -173,13 +173,13 @@ int bmp_encoder(FILE *src_ptr, bmp_header_t *pBmp) {
 	pBmp->pixel_array_off = sizeof(bmp_header);
 
 	// writing header to dest file
-		int count = 1;
-		int n_obj = fwrite(pBmp, sizeof(bmp_header), count, dest_ptr);
-		if(n_obj != count) {
-			//error occurred writing to file
-			perror("Error occurred encoding file");
-			return 1;
-		}
+	int count = 1;
+	int n_obj = fwrite(pBmp, sizeof(bmp_header), count, dest_ptr);
+	if(n_obj != count) {
+		//error occurred writing to file
+		perror("Error occurred encoding file");
+		return 1;
+	}
 
 	// write pixel array to dest file
 	int n_read, n_written;
